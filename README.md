@@ -3,8 +3,6 @@
 The Fantasy Football Oracle is an advanced, conversational AI chatbot designed to answer questions about a fantasy football league's history by querying a SQL database. It features a sophisticated, multi-step architecture that ensures both accuracy and performance, making it a robust and reliable data analyst.
 
 ## Table of Contents
-
-- [Live Demo](#live-demo)
 - [Features](#features)
 - [Core Architecture](#core-architecture)
 - [How It Works: A Step-by-Step Example](#how-it-works-a-step-by-step-example)
@@ -13,14 +11,7 @@ The Fantasy Football Oracle is an advanced, conversational AI chatbot designed t
 - [Project Structure](#project-structure)
 - [Logging and Debugging](#logging-and-debugging)
 
-## Live Demo
-
-*(Optional: You can add a GIF of the app in action here.)*
-
-
-
 ## Features
-
 - **Natural Language Queries:** Ask complex questions in plain English (e.g., "who had the most passing yards in 2019?" or "what was my win/loss record against Jake?").
 - **Conversational Context:** The chatbot remembers previous turns in the conversation, allowing for follow-up questions (e.g., "who won the league in 2018?" followed by "what was their team name?").
 - **Performant and Responsive:** Utilizes caching to ensure fast responses after the initial startup.
@@ -28,9 +19,9 @@ The Fantasy Football Oracle is an advanced, conversational AI chatbot designed t
 - **Detailed In-App Debugging:** An "Agent's Internal Context" expander shows exactly what information the AI is using to answer your question, providing full transparency.
 
 ## Core Architecture
-
 This application's strength lies in its **two-stage, "Constrained Agent" architecture**. Instead of giving a powerful AI agent free rein over the entire database (which is slow and error-prone), we break the problem into two distinct steps:
 
+```mermaid
 graph TD
     A[User Input: "Who won in 2018?"] --> B{Stage 1: Table Selector};
     B --> C[Identifies Tables: <br/>- FantasySeasons_LLM<br/>- FantasyOwners_LLM];
