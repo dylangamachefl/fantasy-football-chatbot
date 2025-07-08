@@ -1,7 +1,3 @@
-Of course. A good README is essential for explaining the "why" behind your code. Here is a comprehensive README.md file that details the sophisticated architecture you've built. It's written in Markdown for direct use on platforms like GitHub.
-
----
-
 # 🏈 Fantasy Football Oracle
 
 The Fantasy Football Oracle is an advanced, conversational AI chatbot designed to answer questions about a fantasy football league's history by querying a SQL database. It features a sophisticated, multi-step architecture that ensures both accuracy and performance, making it a robust and reliable data analyst.
@@ -146,5 +142,6 @@ This architecture ensures the final agent is focused, efficient, and working wit
 The application is heavily instrumented for debugging:
 
 - **`agent_debug.log`:** A comprehensive log file that records every step of the agent's reasoning process, including the full context it receives, every action it takes, and every observation it makes.
-- **In-App Expander:** The UI contains a collapsible "Agent's Internal Context" box for every query. This provides immediate, real-time insight into which tables were selected and what schema information was provided to the agent, making it easy to diagnose issues without checking log files.#   f a n t a s y - f o o t b a l l - c h a t b o t  
+- **In-App Expander:** The UI contains a collapsible "Agent's Internal Context" box for every query. This provides immediate, real-time insight into which tables were selected and what schema information was provided to the agent, making it easy to diagnose issues without checking log files.#   f a n t a s y - f o o t b a l l - c h a t b o t 
+ 
  

@@ -1,0 +1,24 @@
+table_name,table_description
+FantasyOwners_LLM,"Contains one row for each unique fantasy league manager (owner). Includes their lifetime statistics like total wins, losses, points, and championships won across all seasons."
+FantasySeasons_LLM,"Contains high-level metadata about each individual fantasy football season. Use this table to find the league name, number of teams, or the champion for a given year. Each season cooresponds to a year. For example, the 2017 season is the same as the year 2017. "
+FantasyTeams_LLM,"Contains one row for each fantasy team within a specific season. This table is the critical link between an owner and their team for a given year, and includes their seasonal record (wins, losses, points)."
+FantasyDraftPicks_LLM,Contains every single pick from every fantasy draft. Each row represents one player being selected by one team. This is the primary source for all draft analysis.
+FantasyMatchups_LLM,"Contains every head-to-head game played in the league's history. Each row represents a single matchup between two owners, including their final scores and the outcome. This is the source for all weekly win/loss data."
+Players_LLM,The master list of all individual players in the database. Use this table to find a player's name using their ID. This is the central table for all player-related information.
+NFLTeams_LLM,"The master list of all 32 NFL teams. Use this table to map an nfl_team_id to its full name (e.g., 'GB' to 'Green Bay Packers')."
+PlayerStats_Season_QB_LLM,Contains seasonal performance statistics for all Quarterback (QB) players. Each row represents one QB's total stats for an entire season.
+PlayerStats_Season_RB_LLM,Contains seasonal performance statistics for all Running Back (RB) players. Each row represents one RB's total stats for an entire season.
+PlayerStats_Season_WR_LLM,Contains seasonal performance statistics for all Wide Receiver (WR) players. Each row represents one WR's total stats for an entire season.
+PlayerStats_Season_TE_LLM,Contains seasonal performance statistics for all Tight End (TE) players. Each row represents one TE's total stats for an entire season.
+PlayerStats_Season_K_LLM,Contains seasonal performance statistics for all Kicker (K) players. Each row represents one Kicker's total stats for an entire season.
+PlayerStats_Weekly_QB_LLM,"Contains weekly, game-by-game performance statistics for all Quarterback (QB) players. Each row represents one QB's stats for a single game."
+PlayerStats_Weekly_RB_LLM,"Contains weekly, game-by-game performance statistics for all Running Back (RB) players. Each row represents one RB's stats for a single game."
+PlayerStats_Weekly_WR_LLM,"Contains weekly, game-by-game performance statistics for all Wide Receiver (WR) players. Each row represents one WR's stats for a single game."
+PlayerStats_Weekly_TE_LLM,"Contains weekly, game-by-game performance statistics for all Tight End (TE) players. Each row represents one TE's stats for a single game."
+PlayerStats_Weekly_K_LLM,"Contains weekly, game-by-game performance statistics for all Kicker (K) players. Each row represents one Kicker's stats for a single game."
+PlayerStats_Season_DST_LLM,Contains seasonal performance statistics for Defense/Special Teams (DST). Each row represents a single NFL team's defensive stats for an entire season.
+PlayerStats_Weekly_DST_LLM,"Contains weekly, game-by-game performance statistics for Defense/Special Teams (DST). Each row represents a single NFL team's defensive stats for a single game."
+DraftAnalysis_Full_LLM,"A comprehensive analysis view combining draft pick data with their actual player performance for that season. This is an advanced view for deep analysis of draft value, such as identifying draft busts and steals."
+HeadToHeadMatchups_LLM,"Provides a detailed, side-by-side view of every head-to-head matchup, including team names, owner names, and scores for both sides. Use this for questions comparing two specific opponents in a single game. 'owner1' is the home team and 'owner2' is the away team."
+RegularSeasonStandings_LLM,"Provides the final regular season standings for each team in each season. This view EXCLUDES all playoff games and is the definitive source for regular season records, points, and finish."
+OwnerCareerLeaderboard_LLM,A summary view that aggregates career statistics for each fantasy owner. Each row represents one owner's entire league history. This is the best table for questions about all-time records and rankings.

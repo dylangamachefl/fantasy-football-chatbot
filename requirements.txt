@@ -1,0 +1,18 @@
+# Core LangChain and AI Framework
+langchain
+langchain-community
+langchain-google-genai
+
+# Database Connector
+SQLAlchemy
+
+# Web Interface
+streamlit
+
+# Environment Variable Management
+python-dotenv
+
+# Voice I/O for Streamlit and Google Cloud
+streamlit-mic-recorder
+google-cloud-speech
+google-cloud-texttospeech
