@@ -13,11 +13,10 @@ from langchain.callbacks.base import BaseCallbackHandler
 from langchain.schema import AgentAction, AgentFinish
 from langchain_community.tools.sql_database.tool import QuerySQLDatabaseTool
 
-## REFACTOR: Import ConversationBufferMemory for stateful chat history.
+## Import ConversationBufferMemory for stateful chat history.
 from langchain.memory import ConversationBufferMemory
 
 # --- Setup ---
-# (No changes here, this part is well-structured)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -71,7 +70,7 @@ if not os.getenv("GOOGLE_API_KEY"):
     raise ValueError("GOOGLE_API_KEY not found.")
 
 
-## REFACTOR: Use st.cache_resource to initialize expensive objects like LLMs and DB connections once.
+## Use st.cache_resource to initialize expensive objects like LLMs and DB connections once.
 ## This prevents re-loading on every user interaction, significantly improving performance.
 @st.cache_resource
 def get_llm():
@@ -188,7 +187,6 @@ def get_detailed_schema_info(
 
 
 def route_query(query: str) -> Optional[str]:
-    # (No changes here, this is a good simple router)
     query_words: Set[str] = set(query.lower().split())
     greetings: Set[str] = {"hello", "hi", "hey"}
     thanks: Set[str] = {"thanks", "thank"}
@@ -202,7 +200,6 @@ def route_query(query: str) -> Optional[str]:
 def get_relevant_tables(
     user_query: str, history: str, table_descriptions: str
 ) -> List[str]:
-    # This prompt is now enhanced to think more deeply about the user's true intent.
     prompt = f"""
     You are an expert database routing assistant. Your ONLY job is to identify ALL database tables required to fully answer a user's question.
 
@@ -240,19 +237,16 @@ def get_relevant_tables(
         return []
 
 
-# --- Final, Constrained Agent Architecture ---
+# --- Agent Architecture ---
 def create_specialized_agent(forced_schema: str):
     """Creates a custom SQL agent with NO schema discovery tools."""
 
-    # Recommended correction (functionally the same, but clearer):
     forced_schema = get_detailed_schema_info(
         table_names=relevant_tables,  # Explicitly map the variable to the parameter
         filepath="data_dictionary.csv",
     )
     tools = [QuerySQLDatabaseTool(db=db)]
 
-    ## REFACTOR: Improved prompt engineering to encourage self-correction.
-    ## By explicitly telling the agent to re-evaluate on error, we make it more robust against generating faulty SQL.
     prompt_template = """
     You are an expert AI data analyst. Your job is to answer questions by generating and running SQLite queries.
     You have access to a database with the following tools:
@@ -298,8 +292,8 @@ def create_specialized_agent(forced_schema: str):
     return AgentExecutor(
         agent=agent,
         tools=tools,
-        verbose=True,  # Keep verbose for debugging, can be set to False in production
-        handle_parsing_errors="Check your output and try again.",  # More user-friendly parsing error
+        verbose=True,
+        handle_parsing_errors="Check your output and try again.",
     )
 
 
@@ -307,7 +301,7 @@ def create_specialized_agent(forced_schema: str):
 
 # Configure the page
 st.set_page_config(page_title="Fantasy Football Oracle", page_icon="🏈")
-st.title("🏈 Fantasy Football Oracle (Constrained & Improved)")
+st.title("🏈 Fantasy Football Oracle")
 st.write("Ask me anything about your league's history!")
 
 # Load static resources once using caching
