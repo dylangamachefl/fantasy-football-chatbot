@@ -41,14 +41,14 @@ The application's strength lies in its **two-stage "Constrained Agent" architect
 
 ```mermaid
 graph TD
-    A[User Input: "Who won in 2018?"] --> B{Stage 1: Table Selector}
+    A[User Input: Who won in 2018?] --> B{Stage 1: Table Selector}
     B --> C[Identifies Tables:<br/>- FantasySeasons_LLM<br/>- FantasyOwners_LLM]
     C --> D{Stage 2: Constrained Agent}
     D --> E[Receives Detailed Schema<br/>for ONLY selected tables]
     E --> F{Executes JOIN Query<br/>on Database}
-    F --> G[Final Answer: "Jake"]
+    F --> G[Final Answer: Jake]
 
-    subgraph "Context Sources"
+    subgraph Context["Context Sources"]
         H[table_dictionary.csv] --> B
         I[data_dictionary.csv] --> D
         J[Database] --> F
