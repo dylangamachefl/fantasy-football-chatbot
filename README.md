@@ -1,4 +1,4 @@
-# 🏈 Fantasy Football Oracle
+# 🏈 Fantasy Football Chatbot
 
 > An advanced, conversational AI chatbot designed to answer questions about fantasy football league history through intelligent SQL database querying.
 
