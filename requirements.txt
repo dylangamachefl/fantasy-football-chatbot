@@ -2,6 +2,7 @@
 langchain
 langchain-community
 langchain-google-genai
+pydantic 
 
 # Database Connector
 SQLAlchemy
@@ -16,3 +17,4 @@ python-dotenv
 streamlit-mic-recorder
 google-cloud-speech
 google-cloud-texttospeech
+

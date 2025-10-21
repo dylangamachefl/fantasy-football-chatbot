@@ -4,6 +4,7 @@ import logging
 import streamlit as st
 from dotenv import load_dotenv
 from typing import Any, List, Optional, Set, Dict
+from pydantic import BaseModel, Field
 
 from langchain.agents import AgentExecutor, create_react_agent
 from langchain.prompts import PromptTemplate
@@ -16,6 +17,9 @@ from langchain_community.tools.sql_database.tool import QuerySQLDatabaseTool
 ## Import ConversationBufferMemory for stateful chat history.
 from langchain.memory import ConversationBufferMemory
 
+# --- Page Configuration (MUST BE FIRST!) ---
+st.set_page_config(page_title="Fantasy Football Oracle", page_icon="🏈")
+
 # --- Setup ---
 logging.basicConfig(
     level=logging.INFO,
@@ -26,17 +30,27 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# --- Pydantic Model for Structured Output ---
+class TableSelection(BaseModel):
+    """Structured output format for table selection."""
+
+    tables: List[str] = Field(
+        description="List of table names needed to answer the query. Include ALL relevant tables."
+    )
+    reasoning: str = Field(
+        description="Brief explanation of why these tables were selected"
+    )
+
+
 class LoggingCallbackHandler(BaseCallbackHandler):
     def on_chain_start(
         self, serialized: Dict[str, Any], inputs: Dict[str, Any], **kwargs: Any
     ) -> Any:
         """Log the inputs when a chain starts, with checks for None."""
-        # This check prevents the AttributeError
         if serialized is None:
             return
 
         logger.info("=" * 80)
-        # Safely get the name of the chain/component that is starting
         chain_name = serialized.get("name", serialized.get("id", ["UnknownChain"])[-1])
         logger.info(f"CHAIN START: {chain_name}")
         logger.info("INPUTS:")
@@ -45,7 +59,6 @@ class LoggingCallbackHandler(BaseCallbackHandler):
             if key == "agent_scratchpad":
                 logger.info(f"  - {key}: [present]")
                 continue
-            # Truncate long history strings for cleaner logs
             if key == "history" and len(str(value)) > 400:
                 logger.info(f"  - {key}: [present, truncated]")
                 continue
@@ -70,38 +83,41 @@ if not os.getenv("GOOGLE_API_KEY"):
     raise ValueError("GOOGLE_API_KEY not found.")
 
 
-## Use st.cache_resource to initialize expensive objects like LLMs and DB connections once.
-## This prevents re-loading on every user interaction, significantly improving performance.
 @st.cache_resource
 def get_llm():
     """Initializes and returns the LLM instance."""
     return ChatGoogleGenerativeAI(
         model="gemini-2.5-flash-lite-preview-06-17",
-        temperature=0,  # Using the latest flash model
+        temperature=0,
     )
+
+
+@st.cache_resource
+def get_structured_llm():
+    """Returns an LLM configured for structured output."""
+    base_llm = get_llm()
+    return base_llm.with_structured_output(TableSelection)
 
 
 @st.cache_resource
 def get_db():
     """Initializes and returns the database connection."""
-    # Note: Using your provided data_dictionary.csv for more detailed schema info
-    # would be a great "next step" for accuracy. For now, this is fine.
     return SQLDatabase.from_uri(
         f"sqlite:///{'llm_fantasy_data.db'}",
-        sample_rows_in_table_info=0,  # Set to 0 to not clutter the prompt with sample rows
+        sample_rows_in_table_info=0,
         lazy_table_reflection=True,
         view_support=True,
     )
 
 
 llm = get_llm()
+structured_llm = get_structured_llm()
 db = get_db()
 
 
-# --- Caching and Helper Functions ---
 @st.cache_data
 def load_table_descriptions(filepath: str) -> str:
-    # (No changes here, this is correct)
+    """Load table descriptions from CSV file."""
     try:
         with open(filepath, mode="r", encoding="utf-8") as csvfile:
             reader = csv.DictReader(csvfile)
@@ -113,6 +129,7 @@ def load_table_descriptions(filepath: str) -> str:
             )
     except Exception as e:
         st.error(f"Failed to load table dictionary: {e}")
+        logger.error(f"Failed to load table dictionary: {e}")
         return ""
 
 
@@ -122,18 +139,16 @@ def get_detailed_schema_info(
 ) -> str:
     """
     Parses the data dictionary to get rich, human-readable column descriptions.
-    This version is more robust, with better logging and case-insensitive matching.
+    Returns a well-formatted schema string for the agent.
     """
-    logger.info(
-        f"Attempting to get detailed schema for tables: {table_names} from {filepath}"
-    )
+    logger.info(f"Loading schema for tables: {table_names}")
+
     try:
         with open(filepath, mode="r", encoding="utf-8") as csvfile:
             reader = csv.DictReader(csvfile)
+            all_rows = list(reader)
 
             normalized_target_tables = {name.strip().lower() for name in table_names}
-
-            all_rows = list(reader)
 
             relevant_rows = [
                 row
@@ -141,55 +156,63 @@ def get_detailed_schema_info(
                 if row["table_name"].strip().lower() in normalized_target_tables
             ]
 
-            logger.info(
-                f"Found {len(relevant_rows)} relevant column descriptions in {filepath}."
-            )
-
             if not relevant_rows:
                 logger.warning(
-                    f"No matching rows found in {filepath} for tables {table_names}. Falling back to basic DB schema."
+                    f"No schema found in {filepath} for {table_names}, using basic schema"
                 )
                 return db.get_table_info(table_names=table_names)
 
+            logger.info(f"Found {len(relevant_rows)} column descriptions in {filepath}")
+
+            # Group by table
             table_schemas = {}
             for row in relevant_rows:
-                # Use the actual table name from the CSV for consistent casing
                 table_name = row["table_name"]
                 if table_name not in table_schemas:
                     table_schemas[table_name] = []
 
-                # --- THIS IS THE CORRECTED LINE ---
-                # Builds the string using only the columns that exist in your CSV.
-                col_info = f"- {row['column_name']}: {row['column_description']}"
+                col_info = f"  • {row['column_name']}: {row['column_description']}"
                 table_schemas[table_name].append(col_info)
 
-            full_schema_str = (
-                "Here is the detailed schema for the tables you are allowed to use:\n\n"
-            )
-            for table, columns in table_schemas.items():
-                full_schema_str += f"Table `{table}`:\n"
-                full_schema_str += "\n".join(columns)
-                full_schema_str += "\n\n"
+            # Build clear, well-formatted schema string
+            schema_parts = [
+                "=" * 70,
+                "DATABASE SCHEMA - AVAILABLE TABLES AND COLUMNS",
+                "=" * 70,
+                "",
+                "These are the ONLY tables and columns you can use:",
+                "",
+            ]
 
-            logger.info("Successfully built detailed schema string.")
-            return full_schema_str.strip()
+            for table, columns in table_schemas.items():
+                schema_parts.append(f"📊 Table: {table}")
+                schema_parts.extend(columns)
+                schema_parts.append("")
+
+            schema_parts.append("=" * 70)
+            schema_parts.append(
+                "IMPORTANT: Do not reference any tables or columns not listed above."
+            )
+            schema_parts.append("=" * 70)
+
+            full_schema = "\n".join(schema_parts)
+            logger.info("Schema built successfully")
+            return full_schema
 
     except FileNotFoundError:
-        logger.error(
-            f"FATAL: The data dictionary file was not found at {filepath}. Falling back to basic schema."
-        )
+        logger.error(f"Data dictionary file not found at {filepath}")
         return db.get_table_info(table_names=table_names)
     except Exception as e:
-        logger.error(
-            f"An unexpected error occurred while reading {filepath}: {e}", exc_info=True
-        )
+        logger.error(f"Error reading {filepath}: {e}", exc_info=True)
         return db.get_table_info(table_names=table_names)
 
 
 def route_query(query: str) -> Optional[str]:
+    """Handle simple queries that don't need database access."""
     query_words: Set[str] = set(query.lower().split())
     greetings: Set[str] = {"hello", "hi", "hey"}
     thanks: Set[str] = {"thanks", "thank"}
+
     if greetings.intersection(query_words):
         return "Hello! How can I help you with your fantasy league data?"
     if thanks.intersection(query_words):
@@ -197,182 +220,284 @@ def route_query(query: str) -> Optional[str]:
     return None
 
 
-def get_relevant_tables(
+def get_relevant_tables_with_pydantic(
     user_query: str, history: str, table_descriptions: str
-) -> List[str]:
-    prompt = f"""
-    You are an expert database routing assistant. Your ONLY job is to identify ALL database tables required to fully answer a user's question.
-
-    **Think step-by-step:**
-    1.  Analyze the user's question to understand the core information they are asking for.
-    2.  Pay close attention to words that imply a need for descriptive names vs. just IDs. For example, if the user asks **"who"** or **"what was the name"**, you MUST include the table that contains names (like `FantasyOwners_LLM` or `FantasyTeams_LLM`).
-    3.  Look at the table descriptions to find all tables that contain the necessary information. A single question often requires joining multiple tables.
-    4.  Based on this, output a single line containing a comma-separated list of ALL the necessary table names.
-
-    Do NOT add any explanation, conversational text, or prefixes. If no tables are relevant, return an empty string.
-
-    --- CONTEXT ---
-    Conversation History:
-    {history}
-
-    Available Table Descriptions:
-    {table_descriptions}
-
-    User's New Question: {user_query}
-    --- END CONTEXT ---
-
-    REQUIRED_TABLES:
+) -> tuple[List[str], str]:
     """
+    Use LLM with structured output (Pydantic) to identify which tables are needed.
+    Returns: (list of table names, reasoning)
+
+    BENEFIT: Guaranteed correct format, no parsing errors!
+    """
+    prompt = f"""You are an expert database routing assistant. Identify ALL database tables required to answer the user's question.
+
+**CRITICAL: If the question asks about PEOPLE or NAMES, you MUST include FantasyOwners_LLM**
+
+**Mandatory Table Selection Rules (DO NOT VIOLATE THESE):**
+
+1. **Questions about PEOPLE/WINNERS/NAMES (WHO questions):**
+   - Keywords: "who", "winner", "champion", "owner", "name", "player"
+   - **ALWAYS include:** FantasyOwners_LLM + FantasySeasons_LLM
+   - Example: "Who won in 2017?" → [FantasySeasons_LLM, FantasyOwners_LLM]
+   
+2. **Questions about TEAMS:**
+   - Keywords: "team", "team name"
+   - **ALWAYS include:** FantasyTeams_LLM + related tables
+   
+3. **Questions about MATCHUPS/GAMES/SCORES:**
+   - Keywords: "game", "matchup", "score", "versus", "against"
+   - **ALWAYS include:** FantasyMatchups_LLM + related tables
+   
+4. **Questions about SEASONS/YEARS/CHAMPIONSHIPS:**
+   - Keywords: "season", "year", "championship", numeric years (2017, 2020, etc.)
+   - **ALWAYS include:** FantasySeasons_LLM
+   - **IF asking WHO won:** Also include FantasyOwners_LLM
+
+5. **When in doubt:**
+   - Include MORE tables rather than fewer
+   - Joining tables is cheap, missing data is expensive
+   - If the question could POSSIBLY need owner names, include FantasyOwners_LLM
+
+**Your Task:**
+Analyze the user's question carefully:
+- Look for keywords that indicate what information they want
+- Think about what data you need to JOIN to get a complete answer
+- Return ALL relevant table names (be generous, not conservative)
+
+--- CONTEXT ---
+Conversation History:
+{history}
+
+Available Tables:
+{table_descriptions}
+
+User Question: {user_query}
+--- END CONTEXT ---
+
+Remember: If the answer requires showing a PERSON'S NAME, you MUST include FantasyOwners_LLM!"""
+
     try:
-        response = llm.invoke(prompt)
-        content = response.content.strip()
-        logger.info(f"Table Selector raw output: {content}")
-        if ":" in content:
-            content = content.split(":")[-1].strip()
-        table_list = [table.strip() for table in content.split(",") if table.strip()]
-        logger.info(f"Table Selector identified relevant tables: {table_list}")
-        return table_list
+        # This returns a TableSelection object with guaranteed structure
+        result: TableSelection = structured_llm.invoke(prompt)
+
+        # Post-processing safety check: If "who" or "winner" is in the query and FantasyOwners not selected, add it
+        query_lower = user_query.lower()
+        who_keywords = ["who", "winner", "champion", "owner"]
+
+        if any(keyword in query_lower for keyword in who_keywords):
+            if not any("fantasyowners" in table.lower() for table in result.tables):
+                logger.warning(
+                    f"Safety catch: Adding FantasyOwners_LLM for WHO question: {user_query}"
+                )
+                result.tables.append("FantasyOwners_LLM")
+                result.reasoning += (
+                    " [Safety: Added FantasyOwners_LLM for WHO question]"
+                )
+
+        logger.info(f"Table Selector (Pydantic) identified: {result.tables}")
+        logger.info(f"Reasoning: {result.reasoning}")
+
+        return result.tables, result.reasoning
+
     except Exception as e:
-        logger.error(f"Failed to select relevant tables: {e}")
-        return []
+        logger.error(f"Structured table selector failed: {e}", exc_info=True)
+        return [], "Error during table selection"
 
 
-# --- Agent Architecture ---
 def create_specialized_agent(forced_schema: str):
-    """Creates a custom SQL agent with NO schema discovery tools."""
-
-    forced_schema = get_detailed_schema_info(
-        table_names=relevant_tables,  # Explicitly map the variable to the parameter
-        filepath="data_dictionary.csv",
-    )
+    """Creates a custom SQL agent with improved prompts and error handling."""
     tools = [QuerySQLDatabaseTool(db=db)]
 
-    prompt_template = """
-    You are an expert AI data analyst. Your job is to answer questions by generating and running SQLite queries.
-    You have access to a database with the following tools:
+    prompt_template = """You are an expert SQLite data analyst. Your job is to answer questions by writing and executing SQL queries against a fantasy football database.
 
-    {tools}
+**CRITICAL RULES:**
+1. This is SQLite - use ONLY SQLite syntax (no MySQL/PostgreSQL features)
+2. Work step-by-step - run ONE query at a time
+3. After EVERY query, WAIT for the actual Observation before proceeding
+4. NEVER predict query results - always execute and observe
+5. If a query fails, carefully read the error message and fix the query
+6. Use proper JOIN syntax with explicit ON clauses
+7. Always use table aliases (T1, T2, etc.) for readability
+8. Only use tables and columns explicitly listed in the schema below
+9. **IMPORTANT: If a query returns no results or empty, try a different approach - don't repeat the same query**
 
-    The only tables you are allowed to query are listed below. Do not assume any other tables or columns exist.
-    Do NOT use any tool other than `sql_db_query`.
+**AVAILABLE TOOLS:**
+{tools}
 
-    **DATABASE SCHEMA:**
-    {schema}
+Tool Names: {tool_names}
 
-    **VERY IMPORTANT INSTRUCTIONS:**
-    1.  Take one small step at a time. Do not try to answer the whole question in a single step.
-    2.  First, think about the query you need to run. Then, use the `sql_db_query` tool.
-    3.  **Do not predict the result of the query.** Wait for the actual "Observation" before you think about the final answer.
-    4.  If a query fails, you MUST analyze the error and try to fix the query.
+{schema}
 
-    Use the following format:
+**COMMON PATTERNS:**
+- To find data for a specific YEAR (e.g., 2017): Use `WHERE season_id = 2017` 
+  (season_id corresponds to the year)
+- To get a person's NAME from their ID: JOIN with FantasyOwners_LLM on owner_id
+- To get a team NAME from team ID: JOIN with FantasyTeams_LLM on team_id
+- ALWAYS check the Observation result before proceeding to the next step
 
-    Question: the input question you must answer
-    Thought: I need to take a single step to answer the question. I will formulate a query.
-    Action: the action to take, should be one of [{tool_names}]
-    Action Input: the SQLite query to run
-    Observation: the result of the query
-    Thought: I have received the result from the query. Now I will analyze it and decide on the next step or the final answer.
-    ... (this Thought/Action/Action Input/Observation can repeat N times)
-    Thought: I now have enough information to form the final answer.
-    Final Answer: the final answer to the original input question
+**PROBLEM-SOLVING APPROACH:**
+1. Understand what information is being requested
+2. Identify which table(s) contain that information
+3. Write a simple query to get the data
+4. If joining tables, ensure the JOIN condition is correct
+5. Execute the query and observe the result
+6. If the result is empty or wrong, try a different query (don't repeat the same one)
+7. Convert the result to a natural language answer
 
-    Begin!
+**REQUIRED FORMAT:**
+Question: [the input question]
+Thought: [analyze the question and plan your query]
+Action: the action to take, should be one of [{tool_names}]
+Action Input: [your SQLite query]
+Observation: [database will return results here]
+Thought: [analyze the results and decide next step]
+... (repeat Thought/Action/Observation as needed)
+Thought: [confirm you have enough information]
+Final Answer: [clear, natural language answer to the question]
 
-    Conversation History:
-    {history}
+**ERROR HANDLING:**
+- If you get "no such column", check the schema and use the correct column name
+- If you get "no such table", verify the table name from the schema
+- If you get "ambiguous column", use table aliases to clarify
+- If a query returns empty results, think about WHY and try a different approach
+- **NEVER run the exact same query more than twice - if it fails twice, try something different**
 
-    Question: {input}
-    Thought:{agent_scratchpad}
-    """
+**REMEMBER:**
+- Never assume data or columns that aren't in the schema
+- Never skip the Observation step
+- Always provide a clear final answer in natural language
+- If stuck in a loop, STOP and try a completely different query approach
+
+Conversation History:
+{history}
+
+Question: {input}
+Thought:{agent_scratchpad}"""
 
     prompt = PromptTemplate.from_template(prompt_template).partial(schema=forced_schema)
 
     agent = create_react_agent(llm=llm, tools=tools, prompt=prompt)
+
     return AgentExecutor(
         agent=agent,
         tools=tools,
         verbose=True,
-        handle_parsing_errors="Check your output and try again.",
+        handle_parsing_errors=True,
+        max_iterations=8,
+        max_execution_time=30,
     )
 
 
 # --- Main Streamlit App ---
-
-# Configure the page
-st.set_page_config(page_title="Fantasy Football Oracle", page_icon="🏈")
 st.title("🏈 Fantasy Football Oracle")
 st.write("Ask me anything about your league's history!")
 
-# Load static resources once using caching
+# --- Sidebar Controls ---
+with st.sidebar:
+    st.header("⚙️ Controls")
+
+    # Show conversation stats
+    if "memory" in st.session_state:
+        num_messages = len(st.session_state.memory.chat_memory.messages)
+        st.metric("Messages in Context", num_messages)
+
+    # Clear conversation button
+    if st.button("🔄 Clear Conversation", use_container_width=True, type="primary"):
+        st.session_state.memory = ConversationBufferMemory(
+            memory_key="history",
+            input_key="input",
+            return_messages=True,
+            max_token_limit=2000,
+        )
+        st.rerun()
+
+    st.markdown("---")
+    st.caption(
+        "💡 **Tip:** Clear the conversation if the Oracle seems confused or has too much context."
+    )
+
+# Load static resources
 table_descriptions = load_table_descriptions("table_dictionary.csv")
 
-# Initialize stateful conversation memory
+# Initialize conversation memory
 if "memory" not in st.session_state:
     st.session_state.memory = ConversationBufferMemory(
         memory_key="history",
         input_key="input",
-        return_messages=True,  # Makes it easier to display chat history
+        return_messages=True,
+        max_token_limit=2000,
     )
 
-# Display chat messages from history on app rerun
+# Display chat history
 for message in st.session_state.memory.chat_memory.messages:
     role = "user" if message.type == "human" else "assistant"
     with st.chat_message(role):
         st.markdown(message.content)
 
-# Main interaction loop, runs when the user types in the chat input
+# Main interaction loop
 if prompt := st.chat_input("Ask a question about your league..."):
-    # Display the user's new message
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Begin processing the user's query and displaying the assistant's response
     with st.chat_message("assistant"):
         with st.spinner("The Oracle is thinking..."):
             assistant_response_content = ""
 
-            # 1. First, check for simple, non-DB queries (greetings, etc.)
+            # 1. Check for simple queries
             simple_response = route_query(prompt)
 
             if simple_response:
                 assistant_response_content = simple_response
                 st.markdown(assistant_response_content)
             else:
-                # 2. If it's a real question, begin the agentic workflow
+                # 2. Complex query - use agentic workflow with Pydantic
                 history_str = st.session_state.memory.load_memory_variables({})[
                     "history"
                 ]
 
-                relevant_tables = get_relevant_tables(
+                # Get relevant tables with structured output (NO PARSING NEEDED!)
+                relevant_tables, reasoning = get_relevant_tables_with_pydantic(
                     prompt, history_str, table_descriptions
                 )
 
+                # Validation: Retry once if no tables selected
                 if not relevant_tables:
-                    assistant_response_content = "I could not determine which data tables are relevant for that question. Please be more specific about what you're looking for."
-                    st.error(assistant_response_content)
-                else:
-                    # --- In-App Debugger & Schema Generation ---
+                    logger.warning("No tables selected, retrying...")
+                    retry_query = f"Which database tables are needed for: '{prompt}'?"
+                    relevant_tables, reasoning = get_relevant_tables_with_pydantic(
+                        retry_query, "", table_descriptions
+                    )
 
-                    # THIS IS THE CORRECTED LINE:
-                    # We pass the 'relevant_tables' variable, which holds the list of tables.
+                if not relevant_tables:
+                    assistant_response_content = (
+                        "I'm having trouble understanding which data you need. "
+                        "Could you rephrase your question? For example:\n"
+                        "- 'Who won the championship in 2020?'\n"
+                        "- 'What was my record against Jake?'\n"
+                        "- 'Show me the top scorers from last season'"
+                    )
+                    st.warning(assistant_response_content)
+                else:
+                    # Generate schema for selected tables
                     forced_schema = get_detailed_schema_info(
                         table_names=relevant_tables, filepath="data_dictionary.csv"
                     )
 
+                    # Show debugging info (INCLUDING REASONING!)
                     with st.expander("🕵️ Agent's Internal Context"):
-                        st.markdown("**Tables Selected for this Query:**")
+                        st.markdown("**Tables Selected:**")
                         st.write(relevant_tables)
+                        st.markdown("**Selection Reasoning:**")
+                        st.info(
+                            reasoning
+                        )  # THIS IS NEW - shows WHY tables were selected
                         st.markdown("---")
-                        st.markdown("**Schema Provided to the Agent:**")
+                        st.markdown("**Schema Provided to Agent:**")
                         st.code(forced_schema, language="text")
 
-                    # --- Agent Execution ---
+                    # Create and execute agent
                     agent_executor = create_specialized_agent(forced_schema)
-
-                    logger.info(
-                        f"Invoking agent for tables {relevant_tables} with user prompt."
-                    )
+                    logger.info(f"Invoking agent with tables: {relevant_tables}")
 
                     try:
                         logging_callback = LoggingCallbackHandler()
@@ -384,14 +509,32 @@ if prompt := st.chat_input("Ask a question about your league..."):
                         st.markdown(assistant_response_content)
 
                     except Exception as e:
-                        error_message = (
-                            f"I encountered an error trying to answer that: {e}"
-                        )
+                        error_str = str(e).lower()
+
+                        if "no such column" in error_str:
+                            error_message = (
+                                "⚠️ I tried to query a column that doesn't exist."
+                            )
+                        elif "no such table" in error_str:
+                            error_message = (
+                                "⚠️ I tried to access a table that doesn't exist."
+                            )
+                        elif (
+                            "timeout" in error_str or "max_execution_time" in error_str
+                        ):
+                            error_message = (
+                                "⏱️ The query took too long. Try a simpler question."
+                            )
+                        else:
+                            error_message = f"❌ Error: {e}"
+
                         st.error(error_message)
                         logger.error(f"Agent execution failed: {e}", exc_info=True)
-                        assistant_response_content = "Sorry, I ran into a problem and couldn't answer your question. Please check the logs for details."
+                        assistant_response_content = (
+                            "Sorry, I couldn't answer that question."
+                        )
 
-    # 3. After generating a response, save the turn to memory for future context
+    # Save to memory
     st.session_state.memory.save_context(
         {"input": prompt}, {"output": assistant_response_content}
     )
